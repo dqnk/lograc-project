@@ -1,8 +1,8 @@
 module project where
 
-open import Data.Nat     using (ℕ)
+open import Data.Nat     using (ℕ; _≟_)
 open import Data.List    using (List; []; _∷_; map)
-open import Data.Maybe   using (Maybe; just; nothing)
+open import Data.Maybe   using (Maybe; just; nothing) renaming (map to map-maybe)
 open import Data.Product using (_×_; _,_; proj₁; proj₂)
 open import Data.Empty   using (⊥; ⊥-elim)
 open import Relation.Binary.PropositionalEquality using (_≡_; refl)
@@ -13,11 +13,17 @@ open import Relation.Nullary using (Dec; yes; no) renaming (¬_ to ~_)
 open import Data.Bool using (Bool; true; false; not)
 open import Relation.Binary using (Decidable; DecidableEquality)
 
+-- ============================================================
+-- Problem 1
+
 data Formula : Set where
     Var : ℕ → Formula
     ¬_  : Formula → Formula
     _∧_ : Formula → Formula → Formula
     _∨_ : Formula → Formula → Formula
+
+-- ============================================================
+-- Problem 2
 
 data Literal : Set where
     Var  : ℕ → Literal
@@ -28,6 +34,8 @@ data NNF : Set where
     _∧_ : NNF → NNF → NNF
     _∨_ : NNF → NNF → NNF
 
+-- ============================================================
+-- Problem 3
 
 mutual
     to-nnf : Formula → NNF
@@ -42,6 +50,9 @@ mutual
     to-nnf-neg (a ∧ b) = to-nnf-neg a ∨ to-nnf-neg b
     to-nnf-neg (a ∨ b) = to-nnf-neg a ∧ to-nnf-neg b
 
+-- ============================================================
+-- Problem 4
+
 -- data Dec (A : Set) : Set where
 --   yes :   A   → Dec A
 --   no  : (~ A) → Dec A
@@ -52,7 +63,6 @@ record DecType : Set₁ where
     test-≡ : (x y : carr) → Dec (x ≡ y)
 
 open DecType
-
 
 module NoDupList where
   infix 4 _∈_
@@ -95,3 +105,41 @@ module Assoc (K : DecType) (V : Set) where
   kvs [ k ]≔ v with k ∈? kvs
   ... | yes _ = kvs
   ... | no  _ = (k , v) ∷ kvs
+
+-- ============================================================
+-- Problem 5
+
+open Assoc (record { carr = ℕ ; test-≡ = _≟_ }) Bool
+ 
+Assignment : Set
+Assignment = Assoc
+ 
+map-maybe2 : (Bool → Bool → Bool) → Maybe Bool → Maybe Bool → Maybe Bool
+map-maybe2 f (just a) (just b) = just (f a b)
+map-maybe2 _ _        _        = nothing
+ 
+eval : Assignment → Formula → Maybe Bool
+eval a (Var i)  = a ‼ i
+eval a (¬ f)    = map-maybe not (eval a f)
+eval a (f ∧ g)  = map-maybe2 Data.Bool._∧_ (eval a f) (eval a g)
+eval a (f ∨ g)  = map-maybe2 Data.Bool._∨_ (eval a f) (eval a g)
+
+-- ============================================================
+-- Problem 6
+
+eval-nnf : Assignment → NNF → Maybe Bool
+eval-nnf a (lit (Var i)) = a ‼ i
+eval-nnf a (lit (¬Var i)) = map-maybe not (a ‼ i)
+eval-nnf a (f ∧ g) = map-maybe2 Data.Bool._∧_ (eval-nnf a f) (eval-nnf a g)
+eval-nnf a (f ∨ g) = map-maybe2 Data.Bool._∨_ (eval-nnf a f) (eval-nnf a g)
+
+-- ============================================================
+-- Problem 7
+
+data Disjunct : Set where
+    lit  : Literal → Disjunct
+    _∨_  : Literal → Disjunct → Disjunct
+
+data CNF : Set where
+    disj : Disjunct → CNF
+    _∧_  : Disjunct → CNF → CNF
