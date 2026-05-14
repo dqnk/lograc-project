@@ -1,7 +1,7 @@
 module project where
 
-open import Data.Nat     using (ℕ; _≟_)
-open import Data.List    using (List; []; _∷_; map)
+open import Data.Nat     using (ℕ; _≟_; zero; suc; _+_)
+open import Data.List    using (List; []; _∷_; map; _++_)
 open import Data.Maybe   using (Maybe; just; nothing) renaming (map to map-maybe)
 open import Data.Product using (_×_; _,_; proj₁; proj₂)
 open import Data.Empty   using (⊥; ⊥-elim)
@@ -139,6 +139,10 @@ eval-nnf a (f ∨ g) = map-maybe2 Data.Bool._∨_ (eval-nnf a f) (eval-nnf a g)
 -- ============================================================
 -- Problem 7
 
+--data Literal : Set where
+--    Var  : ℕ → Literal
+--    ¬Var : ℕ → Literal
+
 data Disjunct : Set where
     lit  : Literal → Disjunct
     _∨_  : Literal → Disjunct → Disjunct
@@ -157,3 +161,109 @@ eval-disj a (l ∨ d)  = map-maybe2 Data.Bool._∨_ (eval-lit a l) (eval-disj a 
 eval-cnf : Assignment → CNF → Maybe Bool
 eval-cnf a (disj d) = eval-disj a d
 eval-cnf a (d ∧ c) = map-maybe2 Data.Bool._∧_ (eval-disj a d) (eval-cnf a c)
+
+-- =============================================================
+-- Problem 9
+
+data ClauseSat : Set where
+    sat : ClauseSat
+    fls : ClauseSat
+    rem : Disjunct -> ClauseSat
+
+data CNFSat : Set where 
+    sat : CNFSat              
+    fls : CNFSat              
+    rem : CNF → CNFSat
+
+LiteralDec : DecType
+LiteralDec = record { carr = Literal ; test-≡ = Literal-≡ } 
+    where
+        Literal-≡ : (x y : Literal) → Dec (x ≡ y)
+        Literal-≡ (Var n)  (Var m)  with n ≟ m
+        ... | yes refl = yes refl
+        ... | no  p    = no (λ { refl → p refl })
+        Literal-≡ (¬Var n) (¬Var m) with n ≟ m
+        ... | yes refl = yes refl
+        ... | no  p    = no (λ { refl → p refl })
+        Literal-≡ (Var _)  (¬Var _) = no (λ ())
+        Literal-≡ (¬Var _) (Var _)  = no (λ ())
+
+same-lit : Literal → Literal → Bool
+same-lit x y with DecType.test-≡ LiteralDec x y
+... | yes _ = true
+... | no  _ = false
+
+flip : Literal → Literal
+flip (Var n)  = ¬Var n
+flip (¬Var n) = Var n
+
+neg-lit : Literal → Literal → Bool
+neg-lit x y = same-lit x (flip y)
+
+
+
+assign-disj : Literal -> Disjunct -> ClauseSat
+assign-disj l (lit x) with same-lit l x
+... | true = sat 
+... | false with neg-lit l x
+...     | true = fls 
+...     | false = rem (lit x)
+assign-disj l (x ∨ d) with same-lit l x 
+... | true = sat 
+... | false with neg-lit l x 
+...     | true = assign-disj l d 
+...     | false with assign-disj l d 
+...         | sat = sat 
+...         | fls = rem (lit x)
+...         | rem d' = rem (x ∨ d')
+
+
+assign-cnf : Literal -> CNF -> CNFSat
+assign-cnf l (disj x) with assign-disj l x
+... | sat = sat 
+... | fls = fls 
+... | rem d = rem (disj d)
+assign-cnf l (x ∧ cnf) with assign-disj l x 
+... | sat = assign-cnf l cnf 
+... | fls = fls 
+... | rem d with assign-cnf l cnf 
+... |   sat = rem (disj d)
+... |   fls = fls 
+... |   rem cnf' = rem (d ∧ cnf')
+
+
+
+dpll-helper : ℕ -> ℕ -> CNF -> Assignment -> Maybe Assignment
+dpll-helper zero _ _ _ = nothing
+dpll-helper (suc k) n cnf assign with assign-cnf (Var n) cnf 
+... | sat = just (assign [ n ]≔ true)
+... | rem cnf' = dpll-helper k (suc n) cnf' (assign [ n ]≔ true) 
+... | fls with assign-cnf (¬Var n) cnf 
+...     | sat = just (assign [ n ]≔ false)
+...     | fls = nothing 
+...     | rem cnf' = dpll-helper k (suc n) cnf' (assign [ n ]≔ false)
+
+size-disj : Disjunct → ℕ
+size-disj (lit _)  = 1
+size-disj (_ ∨ d)  = 1 + size-disj d
+
+size-cnf : CNF → ℕ
+size-cnf (disj d) = size-disj d
+size-cnf (d ∧ c)  = size-disj d + size-cnf c
+
+dpll : CNF -> Maybe Assignment
+dpll cnf = dpll-helper (size-cnf cnf) zero cnf [] 
+
+-- ============================================================
+-- DPLL tests 
+test-cnf : CNF
+test-cnf = (Var 0 ∨ lit (Var 1)) ∧ disj (¬Var 0 ∨ lit (Var 2))
+
+test-cnf-unsat : CNF
+test-cnf-unsat = (lit (Var 0)) ∧ disj (lit (¬Var 0))
+
+test1 : Maybe Assignment
+test1 = dpll test-cnf
+
+test2 : Maybe Assignment
+test2 = dpll test-cnf-unsat
