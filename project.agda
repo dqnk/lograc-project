@@ -127,9 +127,12 @@ eval a (f ∨ g)  = map-maybe2 Data.Bool._∨_ (eval a f) (eval a g)
 -- ============================================================
 -- Problem 6
 
+eval-lit : Assignment → Literal → Maybe Bool
+eval-lit a (Var i)  = a ‼ i
+eval-lit a (¬Var i) = map-maybe not (a ‼ i)
+
 eval-nnf : Assignment → NNF → Maybe Bool
-eval-nnf a (lit (Var i)) = a ‼ i
-eval-nnf a (lit (¬Var i)) = map-maybe not (a ‼ i)
+eval-nnf a (lit l) = eval-lit a l
 eval-nnf a (f ∧ g) = map-maybe2 Data.Bool._∧_ (eval-nnf a f) (eval-nnf a g)
 eval-nnf a (f ∨ g) = map-maybe2 Data.Bool._∨_ (eval-nnf a f) (eval-nnf a g)
 
@@ -143,3 +146,14 @@ data Disjunct : Set where
 data CNF : Set where
     disj : Disjunct → CNF
     _∧_  : Disjunct → CNF → CNF
+
+-- ============================================================
+-- Problem 8
+
+eval-disj : Assignment → Disjunct → Maybe Bool
+eval-disj a (lit l)  = eval-lit a l
+eval-disj a (l ∨ d)  = map-maybe2 Data.Bool._∨_ (eval-lit a l) (eval-disj a d)
+
+eval-cnf : Assignment → CNF → Maybe Bool
+eval-cnf a (disj d) = eval-disj a d
+eval-cnf a (d ∧ c) = map-maybe2 Data.Bool._∧_ (eval-disj a d) (eval-cnf a c)
