@@ -1,7 +1,7 @@
 module project where
 
 open import Data.Nat     using (ℕ; _≟_; zero; suc; _+_)
-open import Data.List    using (List; []; _∷_; map; _++_)
+open import Data.List    using (List; []; _∷_; map; _++_; length)
 open import Data.Maybe   using (Maybe; just; nothing) renaming (map to map-maybe)
 open import Data.Product using (_×_; _,_; proj₁; proj₂)
 open import Data.Empty   using (⊥; ⊥-elim)
@@ -175,32 +175,69 @@ data CNFSat : Set where
     fls : CNFSat              
     rem : CNF → CNFSat
 
+
+Literal-≡ : (x y : Literal) → Dec (x ≡ y)
+Literal-≡ (Var n)  (Var m)  with n ≟ m
+... | yes refl = yes refl
+... | no  p    = no (λ { refl → p refl })
+Literal-≡ (¬Var n) (¬Var m) with n ≟ m
+... | yes refl = yes refl
+... | no  p    = no (λ { refl → p refl })
+Literal-≡ (Var _)  (¬Var _) = no (λ ())
+Literal-≡ (¬Var _) (Var _)  = no (λ ())
+
 LiteralDec : DecType
 LiteralDec = record { carr = Literal ; test-≡ = Literal-≡ } 
-    where
-        Literal-≡ : (x y : Literal) → Dec (x ≡ y)
-        Literal-≡ (Var n)  (Var m)  with n ≟ m
-        ... | yes refl = yes refl
-        ... | no  p    = no (λ { refl → p refl })
-        Literal-≡ (¬Var n) (¬Var m) with n ≟ m
-        ... | yes refl = yes refl
-        ... | no  p    = no (λ { refl → p refl })
-        Literal-≡ (Var _)  (¬Var _) = no (λ ())
-        Literal-≡ (¬Var _) (Var _)  = no (λ ())
-
-same-lit : Literal → Literal → Bool
-same-lit x y with DecType.test-≡ LiteralDec x y
-... | yes _ = true
-... | no  _ = false
-
-flip : Literal → Literal
-flip (Var n)  = ¬Var n
-flip (¬Var n) = Var n
-
-neg-lit : Literal → Literal → Bool
-neg-lit x y = same-lit x (flip y)
 
 
+module LiteralSet where
+    record LiteralSet : Set where
+        constructor makeLiteralSet
+        field
+            literals : List Literal
+            nodup : NoDupList.NoDup literals
+
+    _∈?-lit_ : (l : Literal) → (ls : List Literal) → Dec (l NoDupList.∈ ls)
+    l ∈?-lit [] = no (λ ())
+    l ∈?-lit (l' ∷ ls) with Literal-≡ l l'
+    ... | yes refl = yes NoDupList.∈-here
+    ... | no  p    with l ∈?-lit ls
+    ...   | yes q  = yes (NoDupList.∈-there q)
+    ...   | no  q  = no (λ { NoDupList.∈-here → p refl ; (NoDupList.∈-there r) → q r })
+
+    empty : LiteralSet
+    empty = makeLiteralSet [] NoDupList.[]-nodup
+
+    insert : Literal -> LiteralSet -> LiteralSet
+    insert l (makeLiteralSet ls nd) with l ∈?-lit ls
+    ... | yes _ = makeLiteralSet ls nd
+    ... | no  p = makeLiteralSet (l ∷ ls) (NoDupList.∷-nodup nd p)
+
+    size : LiteralSet -> ℕ
+    size (makeLiteralSet literals _ ) = length literals  
+
+    same-lit : Literal → Literal → Bool
+    same-lit x y with DecType.test-≡ LiteralDec x y
+    ... | yes _ = true
+    ... | no  _ = false
+
+    flip : Literal → Literal
+    flip (Var n)  = ¬Var n
+    flip (¬Var n) = Var n
+
+    neg-lit : Literal → Literal → Bool
+    neg-lit x y = same-lit x (flip y)
+
+    contains : Literal -> LiteralSet -> Bool  
+    contains l (makeLiteralSet literals _ ) = helper literals 
+        where helper : List Literal -> Bool 
+              helper [] = false 
+              helper (l' ∷ ls) with same-lit l l'
+              ... | true = true 
+              ... | false = helper ls
+
+
+open LiteralSet
 
 assign-disj : Literal -> Disjunct -> ClauseSat
 assign-disj l (lit x) with same-lit l x
