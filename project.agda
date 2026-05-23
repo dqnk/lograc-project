@@ -355,8 +355,8 @@ test-cnf-unsat : CNF
 test-cnf-unsat = (lit (Var 0)) ∧ disj (lit (¬Var 0))
 
 
+test1 : Maybe Assignment
+test1 = dpll test-cnf
+
 test2 : Maybe Assignment
 test2 = dpll test-cnf-unsat
-
-test3 : Maybe Assignment
-test3 = dpll test-sat
