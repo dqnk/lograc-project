@@ -1,6 +1,6 @@
 module project where
 
-open import Data.Nat     using (ℕ; _≟_; zero; suc; _+_)
+open import Data.Nat     using (ℕ; _≟_; zero; suc; _+_; _⊔_)
 open import Data.List    using (List; []; _∷_; map; _++_; length)
 open import Data.Maybe   using (Maybe; just; nothing) renaming (map to map-maybe)
 open import Data.Product using (_×_; _,_; proj₁; proj₂)
@@ -190,54 +190,19 @@ LiteralDec : DecType
 LiteralDec = record { carr = Literal ; test-≡ = Literal-≡ } 
 
 
-module LiteralSet where
-    record LiteralSet : Set where
-        constructor makeLiteralSet
-        field
-            literals : List Literal
-            nodup : NoDupList.NoDup literals
+same-lit : Literal → Literal → Bool
+same-lit x y with DecType.test-≡ LiteralDec x y
+... | yes _ = true
+... | no  _ = false
 
-    _∈?-lit_ : (l : Literal) → (ls : List Literal) → Dec (l NoDupList.∈ ls)
-    l ∈?-lit [] = no (λ ())
-    l ∈?-lit (l' ∷ ls) with Literal-≡ l l'
-    ... | yes refl = yes NoDupList.∈-here
-    ... | no  p    with l ∈?-lit ls
-    ...   | yes q  = yes (NoDupList.∈-there q)
-    ...   | no  q  = no (λ { NoDupList.∈-here → p refl ; (NoDupList.∈-there r) → q r })
+flip : Literal → Literal
+flip (Var n)  = ¬Var n
+flip (¬Var n) = Var n
 
-    empty : LiteralSet
-    empty = makeLiteralSet [] NoDupList.[]-nodup
-
-    insert : Literal -> LiteralSet -> LiteralSet
-    insert l (makeLiteralSet ls nd) with l ∈?-lit ls
-    ... | yes _ = makeLiteralSet ls nd
-    ... | no  p = makeLiteralSet (l ∷ ls) (NoDupList.∷-nodup nd p)
-
-    size : LiteralSet -> ℕ
-    size (makeLiteralSet literals _ ) = length literals  
-
-    same-lit : Literal → Literal → Bool
-    same-lit x y with DecType.test-≡ LiteralDec x y
-    ... | yes _ = true
-    ... | no  _ = false
-
-    flip : Literal → Literal
-    flip (Var n)  = ¬Var n
-    flip (¬Var n) = Var n
-
-    neg-lit : Literal → Literal → Bool
-    neg-lit x y = same-lit x (flip y)
-
-    contains : Literal -> LiteralSet -> Bool  
-    contains l (makeLiteralSet literals _ ) = helper literals 
-        where helper : List Literal -> Bool 
-              helper [] = false 
-              helper (l' ∷ ls) with same-lit l l'
-              ... | true = true 
-              ... | false = helper ls
+neg-lit : Literal → Literal → Bool
+neg-lit x y = same-lit x (flip y)
 
 
-open LiteralSet
 
 assign-disj : Literal -> Disjunct -> ClauseSat
 assign-disj l (lit x) with same-lit l x
@@ -270,37 +235,128 @@ assign-cnf l (x ∧ cnf) with assign-disj l x
 
 
 
+
+contains-literal : Literal -> List Literal -> Bool 
+contains-literal l [] = false
+contains-literal l (x ∷ xs) with same-lit l x 
+... | true = true 
+... | false = contains-literal l xs
+
+assign-lit : Literal -> Assignment -> Assignment
+assign-lit (Var n) assign = assign [ n ]≔ true
+assign-lit (¬Var n) assign = assign [ n ]≔ false
+
+assign-literals : List Literal -> CNF -> Assignment -> CNFSat × Assignment
+assign-literals [] cnf assign = (rem cnf , assign)
+assign-literals (l ∷ ls) cnf assign with assign-cnf l cnf 
+... | fls = (fls , assign)
+... | sat = (sat , assign-lit l assign) 
+... | rem c = assign-literals ls c (assign-lit l assign)
+
+
+
+
+
+unit-literals : CNF -> List Literal -> Maybe (List Literal)
+unit-literals (disj (lit l)) acc with contains-literal (flip l) acc 
+... | true = nothing 
+... | false with contains-literal l acc 
+...     | true = just acc 
+...     | false = just (l ∷ acc)
+unit-literals (disj _ ) acc = just acc 
+unit-literals (d ∧ cnf) acc with d 
+... | (_ ∨ _) = unit-literals cnf acc 
+... | (lit l) with contains-literal (flip l) acc
+...   | true  = nothing
+...   | false with contains-literal l acc
+...     | true  = unit-literals cnf acc
+...     | false = unit-literals cnf (l ∷ acc)
+
+unit-propagate : CNF -> Assignment -> CNFSat × Assignment
+unit-propagate cnf assign with unit-literals cnf [] 
+... | nothing = (fls , assign)
+... | just lits = assign-literals lits cnf assign 
+
+
+pure-literals-helper : Disjunct -> List Literal -> Maybe (List Literal)
+pure-literals-helper (lit l) acc with contains-literal (flip l) acc 
+... | true = just acc 
+... | false with contains-literal l acc 
+...     | true = just acc 
+...     | false = just (l ∷ acc)
+pure-literals-helper (l ∨ d) acc with contains-literal (flip l) acc 
+... | true = pure-literals-helper d acc 
+... | false with contains-literal l acc 
+...     | true = pure-literals-helper d acc 
+...     | false = pure-literals-helper d (l ∷ acc)
+
+pure-literals : CNF -> List Literal -> Maybe (List Literal)
+pure-literals (disj d) acc = pure-literals-helper d acc 
+pure-literals (d ∧ cnf) acc with pure-literals-helper d acc 
+... | nothing = nothing
+... | just l = pure-literals cnf l 
+
+pure-propagate : CNF -> Assignment -> CNFSat × Assignment
+pure-propagate cnf assign with pure-literals cnf [] 
+... | nothing = (fls , assign)
+... | just lits = assign-literals lits cnf assign 
+
+
+
+
+lit-num : Literal → ℕ
+lit-num (Var n)  = n
+lit-num (¬Var n) = n
+
+next-literal-helper : Disjunct -> ℕ
+next-literal-helper (lit x) = lit-num x
+next-literal-helper (x ∨ d) = lit-num x
+
+next-literal-num : CNF -> ℕ
+next-literal-num (disj x) = next-literal-helper x
+next-literal-num (x ∧ cnf) = next-literal-helper x
+
+max-disj : Disjunct → ℕ
+max-disj (lit l)  = lit-num l
+max-disj (l ∨ d)  = lit-num l ⊔ max-disj d
+
+max-cnf : CNF → ℕ
+max-cnf (disj d)  = max-disj d
+max-cnf (d ∧ cnf) = max-disj d ⊔ max-cnf cnf
+
+
+
 dpll-helper : ℕ -> ℕ -> CNF -> Assignment -> Maybe Assignment
 dpll-helper zero _ _ _ = nothing
-dpll-helper (suc k) n cnf assign with assign-cnf (Var n) cnf 
-... | sat = just (assign [ n ]≔ true)
-... | rem cnf' = dpll-helper k (suc n) cnf' (assign [ n ]≔ true) 
-... | fls with assign-cnf (¬Var n) cnf 
-...     | sat = just (assign [ n ]≔ false)
-...     | fls = nothing 
-...     | rem cnf' = dpll-helper k (suc n) cnf' (assign [ n ]≔ false)
+dpll-helper (suc k) n cnf assign with unit-propagate cnf assign
+... | (fls , _ ) = nothing
+... | (sat , assign') = just assign'
+... | (rem cnf-unit , assign-unit) with pure-propagate cnf-unit assign-unit
+...     | (fls , _ ) = nothing
+...     | (sat , assign') = just assign'
+...     | (rem cnf-pure , assign-pure) with assign-cnf (Var n) cnf-unit 
+...         | sat = just (assign-pure [ n ]≔ true)
+...         | rem c = dpll-helper k (next-literal-num c) c (assign-pure [ n ]≔ true) 
+...         | fls with assign-cnf (¬Var n) cnf-pure 
+...             | sat = just (assign-pure [ n ]≔ false)
+...             | fls = nothing 
+...             | rem c = dpll-helper k (next-literal-num c) c (assign-pure [ n ]≔ false)
 
-size-disj : Disjunct → ℕ
-size-disj (lit _)  = 1
-size-disj (_ ∨ d)  = 1 + size-disj d
-
-size-cnf : CNF → ℕ
-size-cnf (disj d) = size-disj d
-size-cnf (d ∧ c)  = size-disj d + size-cnf c
 
 dpll : CNF -> Maybe Assignment
-dpll cnf = dpll-helper (size-cnf cnf) zero cnf [] 
+dpll cnf = dpll-helper (max-cnf cnf) zero cnf [] 
 
 -- ============================================================
 -- DPLL tests 
 test-cnf : CNF
-test-cnf = (Var 0 ∨ lit (Var 1)) ∧ disj (¬Var 0 ∨ lit (Var 2))
+test-cnf = (lit (Var 0)) ∧ disj (¬Var 0 ∨ lit (Var 2))
 
 test-cnf-unsat : CNF
 test-cnf-unsat = (lit (Var 0)) ∧ disj (lit (¬Var 0))
 
-test1 : Maybe Assignment
-test1 = dpll test-cnf
 
 test2 : Maybe Assignment
 test2 = dpll test-cnf-unsat
+
+test3 : Maybe Assignment
+test3 = dpll test-sat
