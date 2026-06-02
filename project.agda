@@ -324,6 +324,10 @@ max-cnf : CNF → ℕ
 max-cnf (disj d)  = max-disj d
 max-cnf (d ∧ cnf) = max-disj d ⊔ max-cnf cnf
 
+max-nnf : NNF → ℕ
+max-nnf (lit l)  = lit-num l
+max-nnf (a ∧ b) = max-nnf a ⊔ max-nnf b
+max-nnf (a ∨ b) = max-nnf a ⊔ max-nnf b
 
 
 dpll-helper : ℕ -> ℕ -> CNF -> Assignment -> Maybe Assignment
@@ -344,7 +348,7 @@ dpll-helper (suc k) n cnf assign with unit-propagate cnf assign
 
 
 dpll : CNF -> Maybe Assignment
-dpll cnf = dpll-helper (max-cnf cnf) zero cnf [] 
+dpll cnf = dpll-helper (suc (max-cnf cnf)) zero cnf [] 
 
 -- ============================================================
 -- DPLL tests 
@@ -360,3 +364,53 @@ test1 = dpll test-cnf
 
 test2 : Maybe Assignment
 test2 = dpll test-cnf-unsat
+
+
+
+-- ============================================================
+-- Problem 10 
+--
+-- Tseytin transformation
+
+-- Take a NNF and the max variable index
+-- Return the root variable, representing the NNF under Tseytin transformation,
+-- the list of disjuncts (can be empty unlike the CNF) and the new max variable index.
+-- The max variable index is used for initializing new variables
+nnf-to-cnf-worker : NNF → ℕ → (Literal × List Disjunct × ℕ)
+nnf-to-cnf-worker (lit l) n = (l , [] , n)
+nnf-to-cnf-worker (a ∧ b) n =
+  let (la , csa , n1) = nnf-to-cnf-worker a n
+      (lb , csb , n2) = nnf-to-cnf-worker b n1
+      -- x is the variable, representing the initial clause
+      x  = Var n2
+      c1 = flip x ∨ lit la                  
+      c2 = flip x ∨ lit lb                  
+      c3 = x ∨ (flip la ∨ lit (flip lb))    
+  in  (x , c1 ∷ c2 ∷ c3 ∷ (csa ++ csb) , suc n2)
+nnf-to-cnf-worker (a ∨ b) n =
+  let (la , csa , n1) = nnf-to-cnf-worker a n
+      (lb , csb , n2) = nnf-to-cnf-worker b n1
+      x  = Var n2
+      c1 = x ∨ lit (flip la)                
+      c2 = x ∨ lit (flip lb)                
+      c3 = flip x ∨ (la ∨ lit lb)           
+  in  (x , c1 ∷ c2 ∷ c3 ∷ (csa ++ csb) , suc n2)
+
+-- combine the disjuncts back into a CNF
+clauses-to-cnf : List Disjunct → Disjunct → CNF
+clauses-to-cnf []       last = disj last
+clauses-to-cnf (d ∷ ds) last = d ∧ clauses-to-cnf ds last
+
+nnf-to-cnf-converter : NNF → CNF
+nnf-to-cnf-converter formula =
+  let (root , clauses , _) = nnf-to-cnf-worker formula (suc (max-nnf formula))
+  in  clauses-to-cnf clauses (lit root)
+
+test-nnf-to-cnf : NNF
+test-nnf-to-cnf = (lit (Var 0)) ∧ (lit (¬Var 1) ∨ lit (Var 2))
+
+test-cnf-out : CNF
+test-cnf-out = nnf-to-cnf-converter test-nnf-to-cnf
+
+test-3 : Maybe Assignment
+test-3 = dpll test-cnf-out
