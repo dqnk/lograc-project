@@ -253,7 +253,17 @@ assign-literals (l ∷ ls) cnf assign with assign-cnf l cnf
 ... | sat = (sat , assign-lit l assign) 
 ... | rem c = assign-literals ls c (assign-lit l assign)
 
+all-lits-disj : Disjunct -> List Literal -> List Literal
+all-lits-disj (lit l) acc with contains-literal l acc 
+... | true = acc 
+... | false = (l ∷ acc)
+all-lits-disj (l ∨ d) acc with contains-literal l acc 
+... | true = all-lits-disj d acc 
+... | false = all-lits-disj d (l ∷ acc)
 
+all-lits : CNF -> List Literal -> List Literal 
+all-lits (disj d) acc = all-lits-disj d acc
+all-lits (d ∧ cnf) acc = all-lits cnf (all-lits-disj d acc)
 
 
 
@@ -278,26 +288,20 @@ unit-propagate cnf assign with unit-literals cnf []
 ... | just lits = assign-literals lits cnf assign 
 
 
-pure-literals-helper : Disjunct -> List Literal -> Maybe (List Literal)
-pure-literals-helper (lit l) acc with contains-literal (flip l) acc 
-... | true = just acc 
-... | false with contains-literal l acc 
-...     | true = just acc 
-...     | false = just (l ∷ acc)
-pure-literals-helper (l ∨ d) acc with contains-literal (flip l) acc 
-... | true = pure-literals-helper d acc 
-... | false with contains-literal l acc 
-...     | true = pure-literals-helper d acc 
-...     | false = pure-literals-helper d (l ∷ acc)
+pure-literals-helper : List Literal -> List Literal -> List Literal
+pure-literals-helper all [] = []
+pure-literals-helper all (l ∷ ls) with contains-literal (flip l) all 
+... | true = pure-literals-helper all ls 
+... | false = l ∷ (pure-literals-helper all ls)
 
-pure-literals : CNF -> List Literal -> Maybe (List Literal)
-pure-literals (disj d) acc = pure-literals-helper d acc 
-pure-literals (d ∧ cnf) acc with pure-literals-helper d acc 
-... | nothing = nothing
-... | just l = pure-literals cnf l 
+
+
+pure-literals : CNF -> Maybe (List Literal)
+pure-literals cnf = just (pure-literals-helper (all-lits cnf []) (all-lits cnf []))
+
 
 pure-propagate : CNF -> Assignment -> CNFSat × Assignment
-pure-propagate cnf assign with pure-literals cnf [] 
+pure-propagate cnf assign with pure-literals cnf 
 ... | nothing = (fls , assign)
 ... | just lits = assign-literals lits cnf assign 
 
@@ -414,3 +418,4 @@ test-cnf-out = nnf-to-cnf-converter test-nnf-to-cnf
 
 test-3 : Maybe Assignment
 test-3 = dpll test-cnf-out
+
