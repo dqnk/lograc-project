@@ -1,6 +1,6 @@
 module project where
 
-open import Data.Nat     using (ℕ; _≟_; zero; suc; _+_; _⊔_)
+open import Data.Nat     using (ℕ; _≟_; zero; suc; _+_; _⊔_; _≤ᵇ_)
 open import Data.List    using (List; []; _∷_; map; _++_; length)
 open import Data.Maybe   using (Maybe; just; nothing) renaming (map to map-maybe)
 open import Data.Product using (_×_; _,_; proj₁; proj₂)
@@ -373,6 +373,9 @@ test2 = dpll test-cnf-unsat
 
 -- ============================================================
 -- Problem 10 
+
+-- =============================================================
+-- Problem 11
 --
 -- Tseytin transformation
 
@@ -419,3 +422,45 @@ test-cnf-out = nnf-to-cnf-converter test-nnf-to-cnf
 test-3 : Maybe Assignment
 test-3 = dpll test-cnf-out
 
+-- =============================================================
+-- Problem 12
+
+filter-assign : (ℕ → Bool) → Assignment → Assignment
+filter-assign p []             = []
+filter-assign p ((k , v) ∷ kvs) with p k
+... | true  = (k , v) ∷ filter-assign p kvs
+... | false = filter-assign p kvs
+
+sat-solver : Formula → Maybe Assignment
+sat-solver f =
+  let nnf     = to-nnf f
+      maxOrig = max-nnf nnf
+      cnf     = nnf-to-cnf-converter nnf
+  in  map-maybe (filter-assign (_≤ᵇ maxOrig)) (dpll cnf)
+
+-- Tests
+
+-- (x0 ∧ x1): satisfiable, expect just [(0,true),(1,true)]
+test-p12-sat1 : Maybe Assignment
+test-p12-sat1 = sat-solver (Var 0 ∧ Var 1)
+
+-- (x0 ∨ x1): satisfiable
+test-p12-sat2 : Maybe Assignment
+test-p12-sat2 = sat-solver (Var 0 ∨ Var 1)
+
+
+-- (x0 ∨ ¬x0): tautology, so satisfiable
+test-p12-sat3 : Maybe Assignment
+test-p12-sat3 = sat-solver (Var 0 ∨ (¬ Var 0))
+
+-- (x0 ∧ ¬x0): unsatisfiable
+test-p12-unsat1 : Maybe Assignment
+test-p12-unsat1 = sat-solver (Var 0 ∧ (¬ Var 0))
+
+-- ¬(x0 ∨ x1) ∧ x0: unsat
+test-p12-unsat2 : Maybe Assignment
+test-p12-unsat2 = sat-solver ((¬ (Var 0 ∨ Var 1)) ∧ Var 0)
+
+-- double negation ¬¬x0
+test-p12-sat4 : Maybe Assignment
+test-p12-sat4 = sat-solver (¬ (¬ Var 0))
